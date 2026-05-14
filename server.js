@@ -106,3 +106,22 @@ app.get("/api/teams", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+app.get("/api/games", async (req, res) => {
+  try {
+    const data = await getListItems("Games");
+    res.json(data);
+  } catch (err) {
+    console.error("Error fetching Games:", err);
+    res.status(500).json({ error: "Failed to fetch Games" });
+  }
+});
+
+app.get("/api/admin", async (req, res) => {
+  try {
+    const data = await getListItems("Admin");
+    res.json(data);
+  } catch (err) {
+    console.error("Error fetching Admin:", err);
+    res.status(500).json({ error: "Failed to fetch Admin" });
+  }
+});
