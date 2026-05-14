@@ -2,11 +2,14 @@ import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import cors from "cors";
-app.use(cors());
+
 dotenv.config();
 
 const app = express();
+app.use(cors());   // <-- MUST come after app is created
+
 const PORT = process.env.PORT || 10000;
+
 
 const tenantId = process.env.TENANT_ID;
 const clientId = process.env.CLIENT_ID;
