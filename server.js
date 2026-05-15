@@ -135,3 +135,27 @@ app.get("/api/admin", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+app.patch("/api/games/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const fields = req.body;
+
+    const result = await updateListItem("Games", id, fields);
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error("Error updating game:", err);
+    res.status(500).json({ error: "Failed to update game" });
+  }
+});
+app.patch("/api/teams/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const fields = req.body;
+
+    const result = await updateListItem("Teams", id, fields);
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error("Error updating team:", err);
+    res.status(500).json({ error: "Failed to update team" });
+  }
+});
