@@ -6,10 +6,9 @@ import cors from "cors";
 dotenv.config();
 
 const app = express();
-app.use(cors());   // <-- MUST come after app is created
+app.use(cors());
 
 const PORT = process.env.PORT || 10000;
-
 
 const tenantId = process.env.TENANT_ID;
 const clientId = process.env.CLIENT_ID;
@@ -39,7 +38,7 @@ async function getAccessToken() {
 }
 
 // ------------------------------------------------------------
-// 2. Auto‑discover siteId and listId, then fetch raw items
+// 2. Fetch ALL pages of a SharePoint list via Microsoft Graph
 // ------------------------------------------------------------
 async function getListItems(listName) {
   const token = await getAccessToken();
@@ -66,15 +65,25 @@ async function getListItems(listName) {
   const listData = await listRes.json();
   const listId = listData.id;
 
-  // Step C: Get raw list items
-  const itemsRes = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
-  );
+  // Step C: Fetch ALL pages of items
+  let items = [];
+  let nextUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`;
 
-  return itemsRes.json();
+  while (nextUrl) {
+    const pageRes = await fetch(nextUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const pageData = await pageRes.json();
+
+    if (pageData.value) {
+      items = items.concat(pageData.value);
+    }
+
+    nextUrl = pageData["@odata.nextLink"] || null;
+  }
+
+  return { value: items };
 }
 
 // ------------------------------------------------------------
@@ -100,12 +109,6 @@ app.get("/api/teams", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
-// 4. Start Server
-// ------------------------------------------------------------
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
 app.get("/api/games", async (req, res) => {
   try {
     const data = await getListItems("Games");
@@ -124,4 +127,11 @@ app.get("/api/admin", async (req, res) => {
     console.error("Error fetching Admin:", err);
     res.status(500).json({ error: "Failed to fetch Admin" });
   }
+});
+
+// ------------------------------------------------------------
+// 4. Start Server
+// ------------------------------------------------------------
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
