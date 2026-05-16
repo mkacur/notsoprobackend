@@ -7,6 +7,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
+app.use(express.json()); // IMPORTANT: needed for PATCH body parsing
 
 const PORT = process.env.PORT || 10000;
 
@@ -14,6 +15,7 @@ const tenantId = process.env.TENANT_ID;
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 
+// Your SharePoint site path
 const sitePath = "fsavaluation.sharepoint.com:/sites/notsopro";
 
 // ------------------------------------------------------------
@@ -87,7 +89,50 @@ async function getListItems(listName) {
 }
 
 // ------------------------------------------------------------
-// 3. API Routes
+// 3. Update a SharePoint list item via Microsoft Graph
+// ------------------------------------------------------------
+async function updateListItem(listName, itemId, fields) {
+  const token = await getAccessToken();
+
+  // Step A: Get siteId
+  const siteRes = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${sitePath}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  const siteData = await siteRes.json();
+  const siteId = siteData.id;
+
+  // Step B: Get listId
+  const listRes = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listName}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  const listData = await listRes.json();
+  const listId = listData.id;
+
+  // Step C: PATCH the fields
+  const updateRes = await fetch(
+    `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(fields),
+    }
+  );
+
+  const updateData = await updateRes.json();
+  return updateData;
+}
+
+// ------------------------------------------------------------
+// 4. API Routes
 // ------------------------------------------------------------
 app.get("/api/divisions", async (req, res) => {
   try {
@@ -130,11 +175,8 @@ app.get("/api/admin", async (req, res) => {
 });
 
 // ------------------------------------------------------------
-// 4. Start Server
+// 5. PATCH Routes (Games + Teams)
 // ------------------------------------------------------------
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
 app.patch("/api/games/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -147,6 +189,7 @@ app.patch("/api/games/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to update game" });
   }
 });
+
 app.patch("/api/teams/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -158,4 +201,11 @@ app.patch("/api/teams/:id", async (req, res) => {
     console.error("Error updating team:", err);
     res.status(500).json({ error: "Failed to update team" });
   }
+});
+
+// ------------------------------------------------------------
+// 6. Start Server
+// ------------------------------------------------------------
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
