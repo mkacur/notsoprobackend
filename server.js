@@ -2,12 +2,13 @@ import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import cors from "cors";
+import { v4 as uuidv4 } from "uuid";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json()); // IMPORTANT: needed for PATCH body parsing
+app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
@@ -18,9 +19,9 @@ const clientSecret = process.env.CLIENT_SECRET;
 // Your SharePoint site path
 const sitePath = "fsavaluation.sharepoint.com:/sites/notsopro";
 
-// ------------------------------------------------------------
+// ============================================================
 // 1. Get Access Token (Client Credentials Flow)
-// ------------------------------------------------------------
+// ============================================================
 async function getAccessToken() {
   const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
@@ -39,9 +40,9 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-// ------------------------------------------------------------
-// 2. Fetch ALL pages of a SharePoint list via Microsoft Graph
-// ------------------------------------------------------------
+// ============================================================
+// 2. Fetch ALL pages of a SharePoint list
+// ============================================================
 async function getListItems(listName) {
   const token = await getAccessToken();
 
@@ -52,7 +53,6 @@ async function getListItems(listName) {
       headers: { Authorization: `Bearer ${token}` },
     }
   );
-
   const siteData = await siteRes.json();
   const siteId = siteData.id;
 
@@ -63,11 +63,10 @@ async function getListItems(listName) {
       headers: { Authorization: `Bearer ${token}` },
     }
   );
-
   const listData = await listRes.json();
   const listId = listData.id;
 
-  // Step C: Fetch ALL pages of items
+  // Step C: Fetch all pages
   let items = [];
   let nextUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`;
 
@@ -77,10 +76,7 @@ async function getListItems(listName) {
     });
 
     const pageData = await pageRes.json();
-
-    if (pageData.value) {
-      items = items.concat(pageData.value);
-    }
+    if (pageData.value) items = items.concat(pageData.value);
 
     nextUrl = pageData["@odata.nextLink"] || null;
   }
@@ -88,9 +84,9 @@ async function getListItems(listName) {
   return { value: items };
 }
 
-// ------------------------------------------------------------
-// 3. Update a SharePoint list item via Microsoft Graph
-// ------------------------------------------------------------
+// ============================================================
+// 3. Update a SharePoint list item
+// ============================================================
 async function updateListItem(listName, itemId, fields) {
   const token = await getAccessToken();
 
@@ -114,7 +110,7 @@ async function updateListItem(listName, itemId, fields) {
   const listData = await listRes.json();
   const listId = listData.id;
 
-  // Step C: PATCH the fields
+  // Step C: PATCH
   const updateRes = await fetch(
     `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
     {
@@ -127,13 +123,12 @@ async function updateListItem(listName, itemId, fields) {
     }
   );
 
-  const updateData = await updateRes.json();
-  return updateData;
+  return updateRes.json();
 }
 
-// ------------------------------------------------------------
-// 4. API Routes
-// ------------------------------------------------------------
+// ============================================================
+// 4. Basic GET Routes (unchanged)
+// ============================================================
 app.get("/api/divisions", async (req, res) => {
   try {
     const data = await getListItems("Divisions");
@@ -174,15 +169,12 @@ app.get("/api/admin", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
-// 5. PATCH Routes (Games + Teams)
-// ------------------------------------------------------------
+// ============================================================
+// 5. PATCH Routes (unchanged)
+// ============================================================
 app.patch("/api/games/:id", async (req, res) => {
   try {
-    const id = req.params.id;
-    const fields = req.body;
-
-    const result = await updateListItem("Games", id, fields);
+    const result = await updateListItem("Games", req.params.id, req.body);
     res.json({ success: true, result });
   } catch (err) {
     console.error("Error updating game:", err);
@@ -192,75 +184,131 @@ app.patch("/api/games/:id", async (req, res) => {
 
 app.patch("/api/teams/:id", async (req, res) => {
   try {
-    const id = req.params.id;
-    const fields = req.body;
-
-    const result = await updateListItem("Teams", id, fields);
+    const result = await updateListItem("Teams", req.params.id, req.body);
     res.json({ success: true, result });
   } catch (err) {
     console.error("Error updating team:", err);
     res.status(500).json({ error: "Failed to update team" });
   }
 });
-// ------------------------------------------------------------
-// 5b. RESET TOURNAMENT DATA (Admin Only)
-// ------------------------------------------------------------
-app.post("/api/reset-tournament", async (req, res) => {
+
+// ============================================================
+// 6. NEW RESET SYSTEM (background job + polling)
+// ============================================================
+
+// In-memory job store
+const resetJobs = {};
+
+// Fetch admin password
+async function getAdminPassword() {
+  const admin = await getListItems("Admin");
+  if (!admin.value.length) throw new Error("Admin list empty.");
+  return admin.value[0].fields.Password;
+}
+
+// Reset Teams
+async function resetTeams(job) {
+  const teams = await getListItems("Teams");
+  job.teamsTotal = teams.value.length;
+  job.teamsDone = 0;
+
+  for (const t of teams.value) {
+    await updateListItem("Teams", t.id, {
+      Wins: 0,
+      Losses: 0,
+      For: 0,
+      Ag: 0,
+      Diff: 0,
+    });
+    job.teamsDone++;
+  }
+}
+
+// Reset Games
+async function resetGames(job) {
+  const games = await getListItems("Games");
+  job.gamesTotal = games.value.length;
+  job.gamesDone = 0;
+
+  for (const g of games.value) {
+    await updateListItem("Games", g.id, {
+      ScoreA: null,
+      ScoreB: null,
+      Winner: null,
+      Loser: null,
+      Status: "Not Started",
+    });
+    job.gamesDone++;
+  }
+}
+
+// Background job runner
+async function runResetJob(jobId) {
+  const job = resetJobs[jobId];
+  if (!job) return;
+
+  job.status = "running";
+  job.startedAt = new Date();
+
   try {
-    console.log("🔄 Reset Tournament Data started...");
+    await resetTeams(job);
+    await resetGames(job);
 
-    // 1. Reset Teams
-    const teamsData = await getListItems("Teams");
-    const teams = teamsData.value;
-
-    for (const t of teams) {
-      await updateListItem("Teams", t.id, {
-        Wins: 0,
-        Losses: 0,
-        For: 0,
-        Ag: 0,
-        Diff: 0,
-      });
-    }
-
-    console.log(`✔ Reset ${teams.length} teams`);
-
-    // 2. Reset Games
-    const gamesData = await getListItems("Games");
-    const games = gamesData.value;
-
-    for (const g of games) {
-      await updateListItem("Games", g.id, {
-        ScoreA: "",
-        ScoreB: "",
-        Winner: "",
-        Loser: "",
-        Status: "",
-      });
-    }
-
-    console.log(`✔ Reset ${games.length} games`);
-
-    res.json({
-      success: true,
-      message: "Tournament data reset successfully.",
-      teamsReset: teams.length,
-      gamesReset: games.length,
-    });
-
+    job.status = "complete";
+    job.finishedAt = new Date();
+    job.message = "Reset complete.";
   } catch (err) {
-    console.error("❌ Reset Tournament Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to reset tournament data.",
-      details: err.message,
-    });
+    console.error("Reset job failed:", err);
+    job.status = "error";
+    job.finishedAt = new Date();
+    job.message = err.message;
+  }
+}
+
+// Start reset
+app.post("/api/start-reset", async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: "Password required." });
+
+    const adminPassword = await getAdminPassword();
+    if (password !== adminPassword)
+      return res.status(401).json({ error: "Invalid password." });
+
+    const jobId = uuidv4();
+    resetJobs[jobId] = {
+      status: "pending",
+      message: "Job created.",
+      teamsDone: 0,
+      teamsTotal: 0,
+      gamesDone: 0,
+      gamesTotal: 0,
+      startedAt: null,
+      finishedAt: null,
+    };
+
+    runResetJob(jobId); // background
+
+    res.json({ jobId, status: "started" });
+  } catch (err) {
+    console.error("Error starting reset:", err);
+    res.status(500).json({ error: "Failed to start reset." });
   }
 });
 
-// ------------------------------------------------------------
-// 6. Start Server
-// ------------------------------------------------------------
+// Poll reset status
+app.get("/api/reset-status", (req, res) => {
+  const { jobId } = req.query;
+  const job = resetJobs[jobId];
+
+  if (!job) return res.status(404).json({ error: "Job not found." });
+
+  res.json(job);
+});
+
+// ============================================================
+// 7. Start Server
+// ============================================================
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
