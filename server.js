@@ -202,6 +202,61 @@ app.patch("/api/teams/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to update team" });
   }
 });
+// ------------------------------------------------------------
+// 5b. RESET TOURNAMENT DATA (Admin Only)
+// ------------------------------------------------------------
+app.post("/api/reset-tournament", async (req, res) => {
+  try {
+    console.log("🔄 Reset Tournament Data started...");
+
+    // 1. Reset Teams
+    const teamsData = await getListItems("Teams");
+    const teams = teamsData.value;
+
+    for (const t of teams) {
+      await updateListItem("Teams", t.id, {
+        Wins: 0,
+        Losses: 0,
+        For: 0,
+        Ag: 0,
+        Diff: 0,
+      });
+    }
+
+    console.log(`✔ Reset ${teams.length} teams`);
+
+    // 2. Reset Games
+    const gamesData = await getListItems("Games");
+    const games = gamesData.value;
+
+    for (const g of games) {
+      await updateListItem("Games", g.id, {
+        ScoreA: "",
+        ScoreB: "",
+        Winner: "",
+        Loser: "",
+        Status: "",
+      });
+    }
+
+    console.log(`✔ Reset ${games.length} games`);
+
+    res.json({
+      success: true,
+      message: "Tournament data reset successfully.",
+      teamsReset: teams.length,
+      gamesReset: games.length,
+    });
+
+  } catch (err) {
+    console.error("❌ Reset Tournament Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to reset tournament data.",
+      details: err.message,
+    });
+  }
+});
 
 // ------------------------------------------------------------
 // 6. Start Server
