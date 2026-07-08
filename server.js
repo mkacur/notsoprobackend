@@ -1,4 +1,4 @@
-import express from "express";
+  import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -17,7 +17,7 @@ const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 
 // Your SharePoint site path
-const sitePath = "fsavaluation.sharepoint.com:/sites/notsopro";
+const sitePath = process.env.SHAREPOINT_SITE_PATH;
 
 // ============================================================
 // 1. Get Access Token (Client Credentials Flow)
